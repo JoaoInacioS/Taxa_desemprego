@@ -1,0 +1,552 @@
+---
+title: "Modelo de Series Temporais com distribuição Beta aplicado em taxas de desocupação mensal do Brasil."
+author: "João Inácio Scrimini"
+abstract: "A Taxa de desocupação (desemprego) é uma porcentagem referente as pessoas que não estão trabalhando formalmente, em idade ativa de trabalhar. alguns aspectos impactam este fator, como crises internacionais, cenário politico instável, modernização, dentre outros. Desta forma, o objetivo deste trabalho é ajustar um modelo de Séries Temporais para a Taxa de desocupação mensal do Brasil, considerando os dados de 2012 a 2022. Foram ajustados o modelo sazonal autorregressivo de médias méveis (SARMA) e o modelo beta autorregressivo de médias méveis ($\\beta$ARMA). Pelas medidas de erro quadrático médio (EQM) e o erro percentual absoluto médio (MAPE), foi possível identificar o melhor modelo para o ajuste da série e para a previsão de 12 meses. O modelo ($\\beta$ARMA) demostrou-se superior para a previsão de 12 meses em relação ao modelo SARMA, já para o ajuste da série os dois modelos mostraram-se equivalentes."
+header-includes:
+   - \usepackage[brazil]{babel}
+   - \usepackage{bm}
+   - \usepackage{float}
+   - \usepackage{multirow}
+   - \usepackage{bm}
+geometry: left=1.7cm, right=1.7cm, top=3cm, bottom=3cm
+output:
+  bookdown::pdf_document2:
+editor_options:
+  chunk_output_type: console
+indent: true
+---
+
+
+
+```{r setup, include=F}
+options(digits = 3)  
+ggplot2::theme_set(ggplot2::theme_minimal()) 
+knitr::opts_chunk$set(echo=F, message=F, warning=F, fig.pos = 'H', 
+                      fig.align = 'center', fig.width = 6, fig.height= 3)
+library(tidyverse)
+
+desocupacao <- readr::read_csv("ipeadata[23-01-2023-02-08].csv")
+desocupacao$taxa_desocupacao<-desocupacao$`Taxa de desocupação - (%) - Instituto Brasileiro de Geografia e Estatística- Pesquisa Nacional por Amostra de Domicílios Contínua (IBGE/PNAD Contínua) - PNADC12_TDESOC12`/100
+desocupacao1 <- desocupacao |> 
+  select(taxa_desocupacao)
+# write_csv(desocupacao1,'taxa_desocupacao.csv')
+# write_csv(desocupacao1[1:117,],'taxa_desocupacao2.csv')
+# writexl::write_xlsx(desocupacao1,'taxa_desocupacao.xlsx')
+# 2012.03 até 2022.11
+
+require(forecast)
+require(tseries)
+require(TSA)
+require(descomponer)
+require(moments)
+require(astsa)
+```
+
+
+# Introdução
+\ \par
+
+Segundo o IBGE a Taxa de desocupação (desemprego) é uma porcentagem referente as pessoas com idade acima de 14 anos, sendo elas consideradas em idade ativa para trabalhar, mas não estão exercendo-a. Desta forma, a taxa de desocupação é calculada pelo total de pessoas desempregadas em idade ativa, dividido pelo total de pessoas em idade ativa. Estudantes universitários que empregam seu tempo para o estudo, dona de cada que não trabalham fora, e um empregador de negócio próprio, são uns dos exemplos que não entram nesta contagem de desempregados. Por exercerem atividade perante a sociedade ou o lar exclusivamente, estando fora da força de trabalho.
+
+Algumas das causas mais cogitadas para o aumento da taxa de desocupação são: 
+
+\textbf{Crises internacionais}: Crises internacionais afetam muito o mercado financeiro de todos os países. Com o dólar em alta a Bolsa de Valores tende a cair, assim, desvalorizando ações e empresas. Afetando na diminuição da exportação de produtos do país.
+
+\textbf{Cenário político instável}: Por conta de más gestões, conflitos políticos e corrupção. Muitos investidores optam por diminuir ou até mesmo retirar seus investimentos no local, por conta do cenário não favorável a eles. Desta forma, ocasionando em menor oferta de emprego.
+
+\textbf{Aumento da população economicamente ativa}: Com o aumento da população economicamente ativa, aumenta também a demanda de emprego, portando se o país não tiver um bom cenário de investimentos para geração de novos empregos, acabam faltando opções de emprego no mercado de trabalho, aumentando a taxa de desempregados.
+
+\textbf{Modernização}: Com o avaço da tecnologia sabermos hoje que desde a Primeira Revolução Industrial, em 1760, as máquinas começaram a tomar lugar das pessoas nas atividades. Desta forma, com essa substituição do humano pela máquina, acaba diminuindo a oferta de trabalho.
+
+Além destes fatores visto, temos também a \textbf{falta de qualificação}, como vemos hoje em nosso cotidiano, cada vez mais é essencial o estudo para poder concorrer a praticamente qualquer tipo de emprego. Ainda mais com o avanço tecnológico, a questão do estudo se torna mais relevante e importante, pois praticamente totas as máquinas necessitam de uma ou mais pessoas para controla-lás, das quais estas pessoas precisam ser qualificadas para conduzi-las corretamente.
+
+Desta forma, o presente estudo busca por meio da Taxa de desocupação mensal do Brasil, de março de 2012 até novembro de 2022, totalizando 129 meses, encontrados no site do governo \textit{ipeadata}, disponníveis ao público na URL \textit{http://www.ipeadata.gov.br/Default.aspx}, ajustar um modelo de Series Temporais que possa prever o mais corretamente o comportamento ocorrido e que consequentemente poderá ocorrer nos próximos meses ou anos. Assim, podendo ser como base para governates ou até mesmo para a população, a fim de desmostrar como o país se encontra e poderá se encontrar daqui algum tempo, referente a Texa de desocupação do Brasil. Para isso, iremos utilizar duas abordagens, a primeira por meio do modelo sazonal autorregressivo de médias méveis (SARMA) ou sem a presença de sazonalidade, modelo autorregressivo de médias méveis (ARMA),  e posteriormente o modelo beta autorregressivo de médias méveis ($\beta$ARMA). O modelo $\beta$ARMA é um modelo proposto por Rocha e Cribari-Neto (2009) para modelar variáveis contínuas restritas ao intervalo (0,1). E para a modelagem considerando o $\beta$ARMA foi utilizada a implementação de uma função desenvolvida para utilização em Bayer e Bayer (2015).
+
+Caso for identificado a presença de tendência ou sazonalidade, acrescentaremos covariáveis buscando explicar estes comportamentos, principalmente para o modelo $\beta$ARMA, já que não apresenta a parte sazonal na estimação. 
+
+Todas as análises foram realizadas pelo \textit{software} R Core Team (2023).
+
+O presente trabalho está dividido da seguinte forma: Seção 2 é a anáilise descritiva da série em estudo. Seção 3 são apresentados os ajustes dos modelos em estudo, em suas subseções (uma para cada modelo ajustado), e posteiormente na útima subseção é feito a comparação dois dois modelos. Por fim, na seção 4 temos a conclusão do trabalho.
+
+# Análise descritiva
+\ \par
+
+Nesta seção analisaremos de perto a serie de Taxa de desocupação mensal do Brasil, de março de 2012 até novembro de 2022. Verificando aspectos iníciais que nos possam guiar para um melhor ajuste de modelo para previsão. 
+
+Desta forma, na Tabela \ref{tab:tab1} é exposto os valores descritivos para a Taxa de desocupação do Brasil. Inicialmente, vemos que a série começa em março de 2012 e termina em novembro de 2022, totalizando 129 meses, como já mencionado anteriormente. E Pela Taxa de desocupação, observa-se que a média é de 10.50% de desocupados no Brasil, durante estes 10-11 anos. O mínimo foi de 6.3%, onde conseguimos visualizar pela Figura \ref{fig:fig1}, que por volta do final de 2013 é onde foi constado este valor mímino da Taxa de desemprego. Outro fator relevante de notar, é que até 2015, aproximadamente, as taxas de desocupação são bem mais baixas, apartir de 2015 essas taxas tenderam a aumentar consideravelmente, saindo da casa de próximo de 7.5% para mais de 12% de desocupados. Para o valor máximo, temos 14.9% de desocupados em idade ativa. Percebe-se que esta marca foi em torno de 2020 a metade de 2021, onde foi decretado calamidade por contado do Covid. Assim, nesta época temos taxas de desemprego muito elevadas, considerando que muitas famílias perderam seus empregos, empresas faliram, por conta de lockdown, confinamentos impostos pelos governates em busca de diminuir o índice de transmissão e consequentemente morte envolvendo o Covid.
+
+
+
+```{r,include=FALSE}
+Y <- ts(desocupacao1$taxa_desocupacao,start=c(2012,3), frequency = 12)
+knitr::kable(fastrep::describe(desocupacao[,c(1,4)]),caption = "",format = "latex")
+adf.test(Y)
+```
+
+\begin{table}[H]
+\caption{\label{tab:tab1}Resultado descritivo da Taxa de desocupação mensal do Brasil.}
+\centering
+\begin{tabular}[t]{lccccc}
+\hline
+variável & Média & Mediana & Desvio Padrão & Mínimo & Máximo \\
+\hline
+Data & - & - & - & 2012/03 & 2022/11 \\
+Taxa de desocupação & 0.105 & 0.113 & 0.026 & 0.063 & 0.149\\
+\hline
+\end{tabular}
+\end{table}
+
+Outro fato histórico que podemos constatar aqui nos dados, é o fato do Impeachment da Presidente Dilma Rousseff em agosto de 2016. Como podemos ver na série, em 2015 até 2017 apriximadamente a Taxa de desemprego disparou. Podemos relatar que a crise imposta na época provocou grande impacto no mercado de trabalho também, diminuindo muito a criação de empregos e empresas terem que fechar, sem consições de mante-las financeiramente. Assim, após o Impeachment em agosto de 2016, Michel Temer, seu Vice, assumiu a Presidência daquele período até 2018, e já em 2017 ele conseguiu estabilizar pelo menos a questão que estamos estudando, a taxa de desemprego como visto no gráfico. Apartir disso, nota-se um constante decaímento desta taxa, de forma sucinta, mas ocorre, até chegar a pandemia da Covid, prejudicando todos os aspectos economicos dos países em geral pelo mundo, consequentemente o Brasil Também, e causando muitas mortes. No qual, consentimos muito por isso.
+
+Assim que as coisas começaram a se estabilizar pelo mundo, e a Covid ser controlada por meio de vacinas, e cuidados pessoais de higiene, com o uso de álcool 70%, e outros fatores, em 2022 vemos uma grande queda nas taxas de desocupados no Brasil, chegando a 8.1% em novembro de 2022, menor taxa vista desde de meados de 2015.
+
+Desta forma, conseguimos assimilar grandes acontecimentos durante essa época que afetaram consideravelmente a Taxa de demprego mensal do Brasil. Sem contar outros aspectos já mencionados anteriormente que podem afetar também essa taxa. Então, percebe-se que a Taxa de desemprego é bastante variada, conforme os acontecimentos. Assim, sendo complicado a sua previsão, já que podem ocorrer alguns fatores muito relevantes, afetando drasticamente esta taxa, como foi a Covid em 2020 e aspectos governamentais por volta de 2016.
+
+Com a contextualização dos acontecimentos que afetaram a Taxa de desemprego, vamos análizar mais tecnicamente a série, buscando realizar o melhor ajuste de modelo de Séries Temporais possível.
+
+```{r fig1, fig.cap="Série Temporal da Taxa de desocupação mensal do Brasil entre 2012 e 2022."}
+autoplot(Y)+
+  labs(x="Tempo (meses)",
+       y="Taxa de desocupação")+
+  theme_classic()
+```
+
+Pelas Figuras \ref{fig:fig2} e \ref{fig:fig3} são apresentados gráficos pra a análise descritiva da série. Primeiramente na Figura \ref{fig:fig2}, nota-se na decomposição da parte sazonal, todo ano iniciando com um aumento nas taxas de desemprego e por volta do 2 trimeste do ano começa a decair até o fim do ano, assim, se repetindo esse comportamento praticamente em todos os ano, desde que não aconteça fatores muito influentes, como o covid em 2020. Na Figura \ref{fig:fig1}, conseguimos ver melhor este acontecimento, pricipalmente entre 2017 e 2020, mas em outros anos conseguimos notar também esse comportamento, de forma mais suave, mas acontece. 
+
+A série apresenta visualmente sazonalidade, e pelo teste de raiz unitária de Dickey-Fuller Aumentado (ADF) para verificar a suposição de estacionariedade, $H_0$: A série apresenta tendência. Obtivemos \textit{p-valor} = 1, maior que o nível de significãncia de 5\%, não rejeitando $H_0$. Portanto como visto no gráfico, a série realmente apresenta tendência. Sendo visto também pela Figura \ref{fig:fig3}, onde temos os gráficos de função de autocorrelação (FAC) e função de autocorrelação parcial (FACP).
+
+
+```{r fig2, fig.width = 6.3, fig.height= 4.5, fig.cap="Decomposição da série em parte sazonal, tendência e resíduo."}
+plot(stl(Y,s.window = 12))
+```
+
+```{r fig3,fig.width = 6, fig.height= 3,fig.cap="FAC e FACP da série em estudo."}
+############# PDF ACF_Série e ACFP_Série #########
+a1<-ggAcf(Y,  main = "", xlab="Defasagem", ylab="FAC", type = c("correlation")) +theme_minimal()
+a2<-ggAcf(Y,type = c("partial"),  main = "", xlab="Defasagem", ylab="FACP")+theme_minimal()
+cowplot::plot_grid(a1,a2,nrow = 1)
+```
+
+# Modelagem
+\ \par
+
+Nesta seção, analizaremos 2 modelos, primeiramente um modelo ajustado SARMA e posteriormente um modelo ajustado $\beta$ARMA. Ao final, será verificado qual dos modelos apresentou melhor ajuste e previsão para 12 meses.
+
+Primeiramente, precisamos dividir a série em treino e teste, sendo visto esta divisão pela Figura \ref{fig:fig4}. No qual, o banco de treino ficou com 117 meses e o banco de teste com 12 meses, os quais serão feito previsão e calculado métricas de comparação entre eles.
+
+Para lidarmos com a tendência e a sazonalidade, iremos acrescentar duas covariáveis ($\beta$'s). Assim temos, para o treino:
+
+$$ \beta_1 = sen(2\pi(k/12)), \quad k = 1, 2,\ ...\ n;$$
+$$\beta_2 = 12sen(2\pi(k/120)), \quad k = 1, 2,\ ...\ n;$$
+
+onde, $n$ é o tamanho amostral do banco de treino. 
+
+Para previsão, aplicamos:
+
+$$ \beta_1 = sen(2\pi(k/12)), \quad k = n+1, n+2,\ ...\ m;$$
+$$\beta_2 = 12sen(2\pi(k/120)), \quad k = n+1, n+2,\ ...\ m;$$
+
+onde, $n$ é o tamanho amostral do banco de treino, e $m$ é o tamanho amostral da série.
+
+Para o $\beta_1$, buscamos representar a sazonalidade vista na análise descritiva, desta forma $k$ foi dividido em 12 para cada unidade, para assim descrever essa sazonalidade anual. E para $\beta_2$, visto que a tendência apresenta um aparencia senoidal, buscamos representar a série inteira, desta forma $k$ foi divido por 120, mas também foi multiplicado por 12 todo resultado do seno, buscando representar de melhor forma a amplitudade da série.
+
+
+
+```{r}
+m<-length(Y)
+h1 <- 12
+n<-m-h1
+
+y<-ts(Y[1:n], start=c(2012,3), frequency = 12)
+y_obs=Y[(n+1):m] 
+```
+
+```{r fig4, include=TRUE, fig.cap="Série dividida em treino e teste."}
+d2a<-c(rep("Treino",117),rep("Teste",12))
+date <- as.Date("2012/03/01")
+t1<-seq(date, by = "month", length.out = m) 
+dt<-data.frame(Y,d2a,t1)
+dt <- dplyr::bind_rows(dt,data.frame(Y=0.116, d2a="Teste" ,t1=as.Date("2021/11/01")))
+dt<-dt |> 
+  mutate(
+    d2a = fct_relevel(d2a, "Treino", "Teste")
+  )
+
+ggplot(dt) +
+  aes(x = t1, y = Y, colour = d2a) +
+  geom_line(size = 0.5) +
+  scale_color_brewer(palette = "Set1", direction = -1) +
+  labs(x="Tempo (meses)",
+       y="Taxa de desocupação",color = "") +
+  theme_classic()
+```
+
+```{r,echo=F}
+dif1<- cbind((sin(2*pi*(1:n)/12)),12*(sin(2*pi*(1:n)/120))) 
+dif2<- cbind((sin(2*pi*((n+1):(n+h1))/12)),12*(sin(2*pi*((n+1):(n+h1))/120)))
+```
+
+
+## SARMA
+\ \par
+
+Com as cavariáveis ajustadas e a série dividida em treino e teste, iremos analizar o modelo ajustado SARMA pela série de treino. Foi realizado uma busca pelo \textit{auto.arima}, do pacote "forecast" no \textit{solfware} R. Que ajusta o melhor modelo automaticamente, segundo a minimização do critério de informação de Akaike (AIC).
+
+Pela Tabela \ref{tab:tabs} são apresentados os coeficientes ajustados pelo modelo SARMA$(2,0,0)(2,0,0)_{12}$. Percebe-se que neste modelo as covariáveis quase não apresentaram significância no modelo, mas mesmo assim, foram mantidas por melhorar o modelo mesmo não sendo muito significativos. O restante dos parâmetros foram tudo significativos a 0.1\% (***). O modelo Apresentou apenas parâmetros auto-regressivos, nenhum parâmetro de médias móveis foi significativo. Ficando $\phi_1$ e $\phi_2$ e mais dois parâmetros para sazonalidade auto-regressiva, $S\phi_1$ e $S\phi_2$, além dos betas.
+
+
+```{r,include=FALSE}
+# ARIMA(2,0,0)(2,0,0)[12]
+# mod<-auto.arima(y,xreg=dif1,stationary = T)
+mod<-arima(y,order = c(2, 0, 0),seasonal = list(order = c(2, 0, 0)),xreg=dif1)
+lmtest::coeftest(mod)
+pred<-predict(mod,n.ahead=12,newxreg = dif2)
+resi=as.vector(residuals(mod))
+resi_padrao1=as.vector((mod$residuals)/(sd(resi)))
+# Modelo ARMA com covariáveis
+# summary(resi_padrao1)
+# kurtosis(resi_padrao1)
+# skewness(resi_padrao1)
+adf.test(resi_padrao1)
+shapiro.test(resi_padrao1)
+teste<-Box.test(resi_padrao1, lag = 110, type = c("Ljung-Box"), fitdf = 0)
+teste$p.value
+```
+\begin{table}[H] 
+\caption{\label{tab:tabs}Coeficientes do modelo ajustado SARMA$(2,0,0)(2,0,0)_{12}$.}
+\begin{center}
+\begin{tabular}{lrrrrl}
+\hline
+  & Estimate & Std. Error & z value & Pr(>|z|)&\\
+\hline           
+$\phi_1$      &  1.766933  & 0.056894  & 31.06 & $< 2e^{-16}$& ***\\
+$\phi_2$     & -0.787351 &  0.056952 & -13.82 &  $< 2e^{-16}$ & ***\\
+$S\phi_1$      & 0.279049  & 0.084405  &  3.31 & 0.00095 & ***\\
+$S\phi_2$      & 0.485292  & 0.093571  &  5.19 & $2.1e^{-07}$ & ***\\
+intercept & 0.103622  & 0.019065  &  5.44 & $5.5e^{-08}$ & ***\\
+$\beta_1$      & 0.004347  & 0.002350   & 1.85 & 0.06430 & .  \\
+$\beta_2$      & -0.001546  & 0.000899 &  -1.72 & 0.08546 & .  \\
+\hline 
+\end{tabular}
+\\\tiny{Código de significância: $0\ ^{***}\ 0.001\ ^{**}\ 0.01\ ^{*}\ 0.05\ ^{.}\ 0.1 \ 1$}
+\end{center}
+\end{table}
+
+
+
+```{r}
+############# ACF_Série e ACFP_Série #########
+a1<-ggAcf(resi_padrao1,  main = "", xlab="Defasagem", ylab="FAC", type = c("correlation"))
+a2<-ggAcf(resi_padrao1,type = c("partial"),  main = "", xlab="Defasagem", ylab="FACP")
+```
+
+
+
+```{r figs1,fig.width = 6, fig.height= 4, fig.cap="Gráficos para análise do ajuste do modelo SARMA$(2,0,0)(2,0,0)_{12}$."}
+## Q-Q plot dos resíduos SARMAIMA
+# max_r<- max(resi_padrao1,na.rm=T)
+# min_r<- min(resi_padrao1,na.rm=T)
+# qqnorm(resi_padrao, pch = "+",
+#        xlim=c(0.95*min_r,max_r*1.05),
+#        ylim=c(0.95*min_r,max_r*1.05),
+#        main="",xlab="quantis normais",ylab="quantis emp?ricos")
+# lines(c(-10,10),c(-10,10),lty=2)
+
+a3<-ggpubr::ggqqplot(resi_padrao1)+labs(y = "Quantis Amostrais",x="Quantis Teóricos",title="")+
+    theme_minimal()
+
+## Resíduos vs. índices SARMAIMA
+
+df1<-data.frame(resi_padrao1)
+a4<-ggplot(df1)+
+  geom_point(aes(x=1:n,y=resi_padrao1),size=0.8) +
+  labs(x="Índice",y="Resíduo")+
+  geom_hline(yintercept = -2,linetype="dashed",colour = "blue",size=0.3)+
+  geom_hline(yintercept = -3,linetype="longdash",colour = "blue",size=0.3)+
+  geom_hline(yintercept = 2,linetype="dashed",colour = "blue",size=0.3)+
+  geom_hline(yintercept = 3,linetype="longdash",colour = "blue",size=0.3)+
+  theme_minimal()+
+  scale_y_continuous(breaks = c(-3,-2,-1,0,1,2,3))
+
+cowplot::plot_grid(a1,a2,a4,a3,ncol = 2)
+```
+
+Pela Figura \ref{fig:figs1} são apresentados os gráficos de FAC, FACP, Resíduo \textit{versus} índice e Envelope simulado, respectivamente, do ajuste do modelo SARMA$(2,0,0)(2,0,0)_{12}$. Nota-se que os gráficos FAC e FACP, apresentam relativamente um bom ajuste, com apenas um lag dos 20 estando levemente fora dos limites, nada muito significativo. Para o Resíduo \textit{versus} índice, vemos todos os pontos dentro dos limites de -3 a 3, sendo a maioria encontando-se dentro de -2 e 2, e distribuidos aparentemente de forma aleatória. No envole simulado, confirma-se as análises anteriores, mostrando um bom ajuste do modelo sobre os dados, com todos os pontos dentro das bandas de confiança.
+
+Para confimar as análises acima, temos os testes de Ljung e Box, ADF, e Shapiro-Wilk. O texte de Ljung e Box junto com os gráficos FAC e FACP, servem para análisar e testar se existe autocorrelação nos resíduos, sendo para o teste $H_0$: Não existe autocorrelação nos resíduos. O teste ADF, como já visto, testa se é satisfeita a suposição de estacionariedade do modelo. E o teste de Shapiro-Wilk, testa se os resíduos se aproximam da distribuição normal, sendo $H_0$: Segue a distribuição normal.
+
+Desta forma, temos pelo teste de Ljung e Box, considerando 110 defasagens (lags), \textit{p-valor} = 0.689, maior que o nível de significância de 5\%. Como visto nos gráficos de FAC e FACP, os resíduos não apresentam autocorrelação. Pelo teste de ADF, temos \textit{p-valor} = $<0.01$, menor que 0.05, portanto o modelo ajustado não apresenta tendência. Por fim, pelo teste de Shapiro-Wilk, temos \textit{p-valor} = 0.3, maior que 0.05, os resíduos seguem distribuição normal, como visto pelo envelope simulado.
+
+Confirmado o ajuste do modelo, pela Figura \ref{fig:figs2} é exposto o gráfico com o ajuste e previsão de 12 meses do modelo SARMA$(2,0,0)(2,0,0)_{12}$. Percebe-se que o modelo não conseguiu descrever muito bem a tendência apresentada nos dados. Saindo a previsão da taxa de desemprego mais elevado que o esperado.
+
+```{r figs2, fig.cap="Ajuste e previsão de 12 meses do modelo ajustado SARMA$(2,0,0)(2,0,0)_{12}$."}
+predicao = y-mod$residuals
+t3<-seq(as.Date("2012/03/01"), by = "month", length.out = 129) 
+df3<-data.frame(t3,Y,pred=c(as.vector(predicao),as.vector(pred$pred)))
+ggplot(df3)+
+  geom_line(aes(x=t3,y=Y))+
+  geom_line(aes(x=t3,y=pred),colour = "red")+
+  geom_vline(xintercept = as.Date("2021/11/01"),linetype="dashed",colour = "black",size=0.5)+
+  labs(x="Tempo (meses)",
+       y="Taxa de desocupação")+
+  theme_classic()
+  
+```
+
+
+## $\beta$ARMA
+\ \par
+
+Ajustado o modelo SARMA, analisaremos agora o melhor ajsute do modelo $\beta$ARMA, seleciodo segundo a minimização do AIC. 
+
+Desta forma, pela Tabela \ref{tab:tabb} são apresentados os coeficientes estimados pelo medelo $\beta$ARMA. Conforme as análises realizadas para ajuste deste modelo, foi verificado a necessidade de retirar o parâmetro autoregressivo $\phi_3$, por não demostrar-se significativo no modelo, e também a necessidade de acrescentar o termo de médias móveis $\theta_6$ para melhorar o ajuste. Todos os parâmetros mostraram-se significativos a 0.1% (***), inclusive as duas covariáveis incluidas, para retirar a sazonalidade ($\beta_1$) e para retirar a tendência ($\beta_2$).
+
+
+```{r,include=FALSE}
+source("barma.r")
+
+barma2<-barma(y,ar=c(1,2,4,5), ma=c(1,2,6), h=h1,diag=1,resid=1,X = dif1,X_hat = dif2)
+res=barma2$resid1
+pref=barma2$forecast
+barma2$model
+adf.test(res)
+shapiro.test(res)
+teste<-Box.test(res, lag = 110, type = c("Ljung-Box"), fitdf = 0)
+teste$p.value
+```
+
+
+
+\begin{table}[H] 
+\caption{\label{tab:tabb}Coeficientes do modelo ajustado $\beta$ARMA.}
+\begin{center}
+\begin{tabular}{lrrrrl}
+\hline
+  & Estimate & Std. Error & z value & Pr(>|z|)&\\
+\hline   
+$\alpha$   &  -0.0227  &   0.0031  & 7.3883    &    0 & *** \\
+$\phi_1$    &   2.2430  &   0.0221 & 101.5395  &      0 & *** \\
+$\phi_2$    &  -1.7391  &   0.0320 &  54.3910     &    0 & *** \\
+$\phi_4$    &   1.1362  &   0.0297 &  38.2994    &     0 & *** \\
+$\phi_5$    &  -0.6506  &   0.0191  & 34.1000   &    0 & *** \\
+$\theta_1$  &  -0.7873  &   0.0403  & 19.5355    &    0 & *** \\
+$\theta_2$   &  0.1884  &   0.0411   & 4.5800   &     0 & *** \\
+$\theta_6$  &  -0.5344  &   0.0311  & 17.1823    &    0 & *** \\
+$\beta_1$   &   0.0494  &   0.0037  & 13.4092     &   0 & *** \\
+$\beta_2$   &  -0.0375  &   0.0039   & 9.7009     &   0 & *** \\
+$\phi_p$ & 21441.2855 & 2878.0849   & 7.4498     &   0 & *** \\
+\hline 
+\end{tabular}
+\\\tiny{Código de significância: $0\ ^{***}\ 0.001\ ^{**}\ 0.01\ ^{*}\ 0.05\ ^{.}\ 0.1 \ 1$}
+\end{center}
+\end{table}
+
+
+
+
+```{r}
+############# ACF_Série e ACFP_Série #########
+a1<-ggAcf(res,  main = "", xlab="Defasagem", ylab="FAC", type = c("correlation"))
+a2<-ggAcf(res,type = c("partial"),  main = "", xlab="Defasagem", ylab="FACP")
+```
+
+
+```{r figb1,fig.width = 6, fig.height= 4,fig.cap="Gráficos para análise do ajuste do modelo $\\beta$ARMA."}
+a3<-ggpubr::ggqqplot(res)+labs(y = "Quantis Amostrais",x="Quantis Teóricos",title="")+
+    theme_minimal()
+
+## Resíduos vs. índices SARMAIMA
+
+df1<-data.frame(res)
+a4<-ggplot(df1)+
+  geom_point(aes(x=1:length(res),y=res),size=0.8) +
+  labs(x="Índice",y="Resíduo")+
+  geom_hline(yintercept = -2,linetype="dashed",colour = "blue",size=0.3)+
+  geom_hline(yintercept = -3,linetype="longdash",colour = "blue",size=0.3)+
+  geom_hline(yintercept = 2,linetype="dashed",colour = "blue",size=0.3)+
+  geom_hline(yintercept = 3,linetype="longdash",colour = "blue",size=0.3)+
+  theme_minimal()+
+  scale_y_continuous(breaks = c(-3,-2,-1,0,1,2,3))
+
+cowplot::plot_grid(a1,a2,a4,a3,ncol = 2)
+```
+Pela Figura \ref{fig:figb1} são apresentados os gráficos de FAC, FACP, Resíduo \textit{versus} índice e Envelope simulado, respectivamente, do ajuste do modelo $\beta$ARMA. Neste caso, pelos FAC e FACP percebemos que apenas uma defasagem apresentou-se levemente fora dos limites, dentre os 20, o restante encontrando-se dentro do esperado. Pelo teste de Ljung e Box, obteve-se \textit{p-valor} = 0.181, maior que o nível de significância de 5\%, então os resíduos não apresentam autocorrelação. Pelo gráfico de Resíduo \textit{versus} índice, a maioria dos resíduos apresentam-se dentro dos limites de -2 e 2, apenas 2 pontos estão apartir, mas dentro dos limites máximos de -3 e 3, portanto os resídos demostram um bom ajuste do modelo e apresentam-se distribuidos de forma aleatória. Pelo gráfico do envelope simulado, nota-se que o modelo está bem ajustado, com praticamente todos os pontos dentro das bandas de confiança. Pelo, teste de Shapiro-Wilk, obteve-se \textit{p-valor} = 0.9, maior que 0.05, portanto os resíduos seguem a distribuição normal, como visto pelo envelope simulado. Por fim, pelo teste de ADF, com \textit{p-valor} = <0.01, menor que 0.05, o modelo ajustado não apresentou tendência.
+
+O ajuste e previsão de 12 meses do modelo ajustado $\beta$ARMA é apresentado pela Figura \ref{fig:figb2}. Comparado com a previsão feita pelo modelo ajustado SARMA na \ref{fig:figs2}, nota-se grande diferença, com o modelo $\beta$ARMA conseguindo prever muito melhor o comportamento da série, que era o esperado pelo fato do modelo $\beta$ARMA ser especificamente para dados limitados entre 0 e 1, como neste caso.  
+
+Para fins de comprovação, na próxima seção serão apresentados medidas para verificar a qualidade do ajuste e comparar os dois modelos.
+
+```{r figb2, fig.cap="Ajuste e previsão de 12 meses do modelo ajustado $\\beta$ARMA."}
+t3<-seq(as.Date("2012/03/01"), by = "month", length.out = 129) 
+df3<-data.frame(t3,Y,pred=c(barma2$fitted,barma2$forecast))
+ggplot(df3)+
+  geom_line(aes(x=t3,y=Y))+
+  geom_line(aes(x=t3,y=pred),colour = "red")+
+  geom_vline(xintercept = as.Date("2021/11/01"),linetype="dashed",colour = "black",size=0.5)+
+  labs(x="Tempo (meses)",
+       y="Taxa de desocupação")+
+  theme_classic()
+```
+
+
+## Previsão
+\ \par
+
+Nesta seção, serão expostos os resultados das análises dos cálculos das medidas de qualidade do ajuste e comparar os modelos. Desta forma, usaremos erro quadrático médio (EQM) e o erro percentual absoluto médio, para o ajuste e previsão de 12 meses. 
+
+Estes resultados podemos ver pela Tabela \ref{tab:tabm}. O modelo ajustado $\beta$ARMA ganha em 3 métricas do modelo SARMA, apenas no que se refere ao ajuste da série que o EQM pelo SARMA é menor, mas questão mínima, os dois mostraram-se muito similares neste ajuste. Já para a previsão, o modelo $\beta$ARMA ganhou consideravelmente, conseguindo capturar muito melhor o comportamento da série para a previsão dos 12 meses, tendo medidas muito menores de erros que o modelo SARMA, como já tinhamos visto anteriormente pelos seus respectivos gráficos de previsão. 
+
+
+
+
+\begin{table}[H]
+\caption{\label{tab:tabm}Medidas de EQM e MAPE dos modelos SARMA e $\beta$ARMA.}
+\centering
+\begin{tabular}[t]{lcccc}
+\hline
+ & \multicolumn{2}{c}{Ajuste} & \multicolumn{2}{c}{Previsão}\\
+\cline{2 - 5}
+  & EQM & MAPE & EQM & MAPE\\
+\hline
+SARMA & \bm{$2.21e^{-06}$} & 0.0117 & $4.75e^{-04}$ & 0.2049 \\
+$\beta$ARMA & $2.35e^{-06}$ & \textbf{0.0115} & \bm{$4.87e^{-05}$} & \textbf{0.0628} \\
+\hline
+\end{tabular}
+\end{table}
+
+Podemos análisar melhor visualmente isto pela Figura \ref{fig:figpre} que nos mostra apenas a parte da previsão entre os dois modelos, comparando com os dados reais. Fica nítido o quanto o modelo SARMA se distanciou da taxa de desocupação real, estimando valores muito maiores que o esperado. Já o modelo $\beta$ARMA conseguiu descrever bem melhor esse comportamento das taxas reais desse periodo de dezembro de 2021 a novembro de 2022, estando bem próximo do esperado.
+
+```{r,include=FALSE}
+t2<-seq(as.Date("2021/12/01"), by = "month", length.out = 12) 
+dados_prev<- data.frame(t2,B=pref,S=as.vector(pred$pred),D=y_obs)
+knitr::kable(dados_prev,format = "latex",caption = "")
+```
+
+```{r figpre,fig.cap="Previsão para 12 meses dos modelos $\\beta$ARMA e SARMA."}
+knitr::include_graphics("grafpre.png")
+```
+
+Pela Tabela \ref{tab:tabpre} são apresentados os valores da previsão feita para os 12 meses, de dezembro de 2021 a novembro de 2022. Nela, conseguimos ver novamente o quanto o modelo SARMA se distanciou do valor real, com previsões de taxa de desemprego tudo na casa dos 11\%. Já o modelo $\beta$ARMA conseguiu pegar esse decaimento, prevendo para novembro de 2022 uma taxa de desemprego de 8.62\%, sendo o valor real de 8.10\%. 
+
+Portanto, o modelo de Séries Temporais ajustado pela distribuição Beta ($\beta$ARMA) se saiu melhor que o modelo SARMA, para a previsão deste conjunto de dados de Taxas de desemprego mensal do Brasil.
+
+
+\begin{table}[H]
+\caption{\label{tab:tabpre}Previsão para 12 meses dos modelos $\beta$ARMA e SARMA.}
+\centering
+\begin{tabular}[t]{lrrr}
+\hline
+Data & Real & $\beta$ARMA & SARMA\\
+\hline
+2021/12 & 0.1110 & 0.1126 & 0.1129\\
+2022/01 & 0.1120 & 0.1113 & 0.1139\\
+2022/02 & 0.1120 & 0.1122 & 0.1151\\
+2022/03 & 0.1110 & 0.1131 & 0.1180\\
+2022/04 & 0.1050 & 0.1124 & 0.1184\\
+2022/05 & 0.0980 & 0.1094 & 0.1190\\
+2022/06 & 0.0930 & 0.1050 & 0.1189\\
+2022/07 & 0.0910 & 0.1005 & 0.1187\\
+2022/08 & 0.0890 & 0.0965 & 0.1191\\
+2022/09 & 0.0870 & 0.0929 & 0.1170\\
+2022/10 & 0.0830 & 0.0894 & 0.1132\\
+2022/11 & 0.0810 & 0.0862 & 0.1102\\
+\hline
+\end{tabular}
+\end{table}
+
+
+```{r, eval=F,fig.width = 6, fig.height= 3.5,fig.cap="Previsão para 12 meses dos modelos $\\beta$ARMA e SARMA."}
+########## Gráfico de Previsão ###########
+
+plot( y_obs, col=1, type="l", ylim=c(0.08,0.125) , axes = F, main="", xlab="Meses (2021-2022)", ylab="Taxa de desocupação")
+lines(pref, lty = 2, lwd = 1)
+lines(as.vector(pred$pred), lty = 3, lwd = 1,)
+#lines(as.vector(zs1$pred), lty = 4, lwd = 1,)
+legend("bottomleft",legend=c( "Valores reais", expression(paste("Valores previstos (", beta, "ARMA)") ), "Valores previstos (SARMA)"  ),
+                    pt.bg="white", lty=c(1,2,3), bty="n" )
+axis(1, 1:12, c("dez","jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov"))
+axis(2)
+
+```
+
+
+```{r,eval=FALSE}
+# Ajuste -----------------------------------------------------------------------
+residuos_b = as.vector(y-barma2$fitted)
+residuos_beta = residuos_b[7:117]
+residuos_SARMA = as.vector(mod$residuals)
+
+
+eqm_beta = (sum(residuos_beta^2))/length(residuos_beta)
+eqm_SARMA = (sum(residuos_SARMAima^2))/length(residuos_SARMAima)
+
+############### MAPE #################
+
+maple_beta = sum( abs(residuos_beta)/abs(y[7:117]) )/ length(residuos_beta)
+maple_SARMA = sum( abs(residuos_SARMAima)/abs(y) )/ length(residuos_SARMAima)
+
+
+# Previsão ---------------------------------------------------------------------
+############### EQM #################
+residuos_beta_prev =(y_obs-pref)
+residuos_SARMAima_prev = (y_obs-as.vector(pred$pred))
+
+
+eqm_bSARMA_prev = (sum(residuos_beta_prev^2))/length(residuos_beta_prev)
+eqm_SARMAima_prev = (sum(residuos_SARMAima_prev^2))/length(residuos_SARMAima_prev)
+
+############### MAPE #################
+
+mape_bSARMA_prev = sum( abs(residuos_beta_prev)/abs(y_obs) )/ length(residuos_beta_prev)
+mape_SARMAima_prev = sum( abs(residuos_SARMAima_prev)/abs(y_obs) )/ length(residuos_SARMAima_prev)
+
+eqm=c(eqm_bSARMA_prev, eqm_SARMAima_prev)
+mape=c(mape_bSARMA_prev, mape_SARMAima_prev)
+
+matriz=cbind(eqm, mape)
+rownames(matriz)=c("BARMA", "SARMA")
+knitr::kable(matriz,format = "latex",caption = "")
+```
+
+
+
+# Conclusões
+
+Neste trabalho realizamos ajuste em dois modelos, modelo SARMA e modelo $\beta$ARMA, com o objetivo de prever a taxa de desemprego mensal do Brasil. Pela análise descritiva visamos a necessidade de acrescentar covariáveis para descrever a sazonalidade e tendência prensentes na série. Ajustados os dois modelos, realizamos medidas de EQM e MAPE dos modelos SARMA e $\beta$ARMA, para a qualidade de ajuste da série e para previsão de 12 meses, buscando selecionar o melhor modelo, apresentando menor erro de ajuste e previsão.
+
+Com os resultados das medidas de ajuste e previsão, confirmamos que o modelo ajustado $\beta$ARMA foi muito superior ao modelo SARMA, no que se refere a previsão de 12 meses, se aproximando muito mais dos valores reais. Já para o ajuste da série, os dois modelos se saíram similares. 
+
+Levando em conta, a grande complexidade de prever a Taxa de desemprego, dos vários motivos já vistos, como governabilidade, cenário mundial, modernização e até mesmo questões raras como foi a Covid em 2020, o modelo ajustado pela distribuição Beta se saiu muito bem, conseguindo prever de forma muito satisfatória, conseguindo descrever bem próximo o comportamento da Taxa de desemprego mensal do Brasil.
+
+\newpage
+
+\section*{Referências}
+\ \par
+
+IPEADATA. http://www.ipeadata.gov.br/Default.aspx. Acessado em 31 de janeiro de 2023. 
+
+
+\ \par
+
+IBGE. \textbf{Desemprego}. https://www.ibge.gov.br/explica/desemprego.php. Acessado em 31 de janeiro de 2023. 
+
+
+\ \par
+
+UNICESUMAR, 2020. \textbf{Causas do desemprego}. https://blog.unicesumar.edu.br/causas-do-desemprego. Acessado em 31 de janeiro de 2023. 
+
+\ \par
+Bayer, D. M., Bayer, F., 2015. \textbf{Relative air humidity forecasting through beta autoregressive moving average model in Brasília}. Revista Brasileira de Meteorologia 30 (3), 319–326.
+
+\ \par
+
+Ferrari, S. L. P., Cribari-Neto, F., 2004. \textbf{Beta regression for modelling rates and proportions}. Journal of Applied Statistics 31 (7), 799–815.
+
+\ \par
+
+Rocha, A. V., Cribari-Neto, F., 2009. \textbf{Beta autoregressive moving average models}. Test 18 (3), 529–545.
+
+\ \par
+
+R Core Team. 2023. R: \textbf{A Language and Environment for Statistical Computing}. Vienna, Austria: R Foundation for Statistical Computing. https://www.R-project.org/
+

@@ -1,0 +1,648 @@
+---
+title: "Modelo de Series Temporais com distribuição Beta aplicado em Taxas de desocupação mensal do Brasil"
+subtitle: 
+author: "João Inácio Scrimini"
+institute: "UFSM"
+date: "`r Sys.Date()`"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+library(tidyverse)
+
+desocupacao <- readr::read_csv("ipeadata[23-01-2023-02-08].csv")
+desocupacao$taxa_desocupacao<-desocupacao$`Taxa de desocupação - (%) - Instituto Brasileiro de Geografia e Estatística- Pesquisa Nacional por Amostra de Domicílios Contínua (IBGE/PNAD Contínua) - PNADC12_TDESOC12`/100
+desocupacao1 <- desocupacao |> 
+  select(taxa_desocupacao)
+# write_csv(desocupacao1,'taxa_desocupacao.csv')
+# write_csv(desocupacao1[1:117,],'taxa_desocupacao2.csv')
+# writexl::write_xlsx(desocupacao1,'taxa_desocupacao.xlsx')
+# 2012.03 até 2022.11
+
+require(forecast)
+require(tseries)
+require(TSA)
+require(descomponer)
+require(moments)
+require(astsa)
+
+Y <- ts(desocupacao1$taxa_desocupacao,start=c(2012,3), frequency = 12)
+knitr::kable(fastrep::describe(desocupacao[,c(1,4)]),caption = "",format = "latex")
+```
+
+# Introdução 
+
+Taxa de desocupação (desemprego) é uma porcentagem referente as pessoas que não estão trabalhando formalmente, em idade ativa de trabalhar. Considerado acima de 14 anos.
+
+Algumas causas para o aumento do desemprego:
+
+- Crises internacionais;
+
+- Cenário político instável;
+
+- Aumento da população economicamente ativa;
+
+- Modernização;
+
+- Qualificação.
+
+O [banco de dados](http://www.ipeadata.gov.br/Default.aspx) do estudo, traz à discussão da taxa de desocupação (desemprego) mensal do brasil. No qual temos 129 meses, variando de março de 2012 até novembro de 2022.
+
+---
+
+# Análise descritiva
+
+Análise descritiva e Série Temporal da Taxa de desocupação mensal do Brasil entre 2012 e 2022.
+<table>
+ <thead>
+  <tr>
+   <th style="text-align:right;">  variável</th>
+   <th style="text-align:right;"> Média </th>
+   <th style="text-align:right;"> Mediana </th>
+   <th style="text-align:right;"> Desvio Padrão </th>
+   <th style="text-align:right;"> Mínimo  </th>
+   <th style="text-align:right;"> Máximo  </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:right;"> Data </td>
+   <td style="text-align:right;"> - </td>
+   <td style="text-align:right;"> - </td>
+   <td style="text-align:right;"> - </td>
+   <td style="text-align:right;"> 2012/03  </td>
+   <td style="text-align:right;"> 2022/11  </td>
+  </tr>
+  <tr>
+   <td style="text-align:right;"> Taxa de desocupação </td>
+   <td style="text-align:right;"> 0.105 </font> </td>
+   <td style="text-align:right;"> 0.113 </td>
+   <td style="text-align:right;"> 0.026  </td>
+   <td style="text-align:right;"> 0.063  </td>
+   <td style="text-align:right;"> 0.149  </td>
+  </tr>
+</tbody>
+</table>
+
+
+```{r,echo=FALSE,warning=FALSE,fig.align='center',fig.width = 10,fig.height=4}
+autoplot(Y)+
+  labs(x="Tempo (meses)",
+       y="Taxa de desocupação")+
+  theme_classic()
+```
+
+---
+Decomposição da série em parte sazonal, tendência e resíduo.
+```{r ,echo=FALSE,warning=FALSE,fig.align='center',fig.width = 10}
+#"Decomposição da série em parte sazonal, tendência e resíduo."
+plot(stl(Y,s.window = 12))
+```
+
+---
+FAC e FACP da série em estudo
+```{r ,echo=FALSE,warning=FALSE,fig.align='center',fig.width = 10}
+#"FAc e FACP da série em estudo."
+############# PDF ACF_Série e ACFP_Série #########
+a1<-ggAcf(Y,  main = "", xlab="Defasagem", ylab="FAC", type = c("correlation"))+theme_minimal()
+a2<-ggAcf(Y,type = c("partial"),  main = "", xlab="Defasagem", ylab="FACP")+theme_minimal()
+cowplot::plot_grid(a1,a2,nrow = 1)
+```
+
+---
+# Modelagem
+```{r,echo=FALSE,warning=FALSE}
+m<-length(Y)
+h1 <- 12
+n<-m-h1
+
+y<-ts(Y[1:n], start=c(2012,3), frequency = 12)
+y_obs=Y[(n+1):m] 
+```
+
+Série dividida em treino e teste
+```{r ,echo=FALSE,warning=FALSE,fig.align='center',fig.width = 10,fig.height=4.5}
+#Série dividida em treino e teste."}
+d2a<-c(rep("Treino",117),rep("Teste",12))
+date <- as.Date("2012/03/01")
+t1<-seq(date, by = "month", length.out = m) 
+dt<-data.frame(Y,d2a,t1)
+dt <- dplyr::bind_rows(dt,data.frame(Y=0.116, d2a="Teste" ,t1=as.Date("2021/11/01")))
+dt<-dt |> 
+  mutate(
+    d2a = fct_relevel(d2a, "Treino", "Teste")
+  )
+
+ggplot(dt) +
+  aes(x = t1, y = Y, colour = d2a) +
+  geom_line(size = 0.5) +
+  scale_color_brewer(palette = "Set1", direction = -1) +
+  labs(x="Tempo (meses)",
+       y="Taxa de desocupação",color = "") +
+  theme_classic()
+```
+
+```{r,echo=TRUE,warning=FALSE}
+dif1<- cbind((sin(2*pi*(1:n)/12)),12*(sin(2*pi*(1:n)/120))) 
+dif2<- cbind((sin(2*pi*((n+1):(n+h1))/12)),
+             12*(sin(2*pi*((n+1):(n+h1))/120)))
+```
+
+---
+# SARMA
+
+
+<table>
+<caption>Coeficientes do modelo ajustado SARMA(2,0,0)(2,0,0)<sub>12</sub></caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;">   </th>
+   <th style="text-align:right;"> Estimate </th>
+   <th style="text-align:right;"> Std. Error </th>
+   <th style="text-align:right;"> z value </th>
+   <th style="text-align:right;"> Pr(&gt;|z|) </th>
+   <th style="text-align:left;">   </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> (Intercept) </td>
+   <td style="text-align:right;"> 0.1036 </td>
+   <td style="text-align:right;"> 0.0191 </td>
+   <td style="text-align:right;"> 5.44 </td>
+   <td style="text-align:right;"> 5.5e<sup>-08</sup> </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> &phi;<sub>1</sub> </td>
+   <td style="text-align:right;"> 1.7669 </td>
+   <td style="text-align:right;"> 0.0569 </td>
+   <td style="text-align:right;"> 31.06 </td>
+   <td style="text-align:right;"> <2e<sup>-16</sup> </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> &phi;<sub>2</sub> </td>
+   <td style="text-align:right;"> -0.7874 </td>
+   <td style="text-align:right;"> 0.0570 </td>
+   <td style="text-align:right;"> -13.82</td>
+   <td style="text-align:right;"> < 2e<sup>-16</sup> </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> S&phi;<sub>1</sub> </td>
+   <td style="text-align:right;"> 0.2790 </td>
+   <td style="text-align:right;"> 0.0844 </td>
+   <td style="text-align:right;"> 3.31 </td>
+   <td style="text-align:right;"> 0.00095 </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> S&phi;<sub>2</sub> </td>
+   <td style="text-align:right;"> 0.4853 </td>
+   <td style="text-align:right;"> 0.0936 </td>
+   <td style="text-align:right;"> 5.19 </td>
+   <td style="text-align:right;"> 2.1e<sup>-07</sup> </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> &beta;<sub>1</sub> </td>
+   <td style="text-align:right;"> 0.0043 </td>
+   <td style="text-align:right;"> 0.0024 </td>
+   <td style="text-align:right;"> 1.85 </td>
+   <td style="text-align:right;"> 0.06430 </td>
+   <th style="text-align:left;"> .  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> &beta;<sub>2</sub> </td>
+   <td style="text-align:right;"> -0.0015 </td>
+   <td style="text-align:right;"> 0.0009 </td>
+   <td style="text-align:right;"> -1.72 </td>
+   <td style="text-align:right;"> 0.08546 </td>
+   <th style="text-align:left;"> .  </th>
+  </tr>
+</tbody>
+</table>
+
+---
+Gráficos para análise do ajuste do modelo SARMA(2,0,0)(2,0,0)<sub>12</sub>
+```{r,echo=FALSE,warning=FALSE,fig.align='center',fig.width = 10,fig.height=7.5}
+mod<-arima(y,order = c(2, 0, 0),seasonal = list(order = c(2, 0, 0)),xreg=dif1)
+# lmtest::coeftest(mod)
+pred<-predict(mod,n.ahead=12,newxreg = dif2)
+resi=as.vector(residuals(mod))
+resi_padrao1=as.vector((mod$residuals)/(sd(resi)))
+# Modelo ARMA com covariáveis
+# summary(resi_padrao1)
+# kurtosis(resi_padrao1)
+# skewness(resi_padrao1)
+# adf.test(resi_padrao1)
+# shapiro.test(resi_padrao1)
+teste<-Box.test(resi_padrao1, lag = 110, type = c("Ljung-Box"), fitdf = 0)
+
+############# ACF_Série e ACFP_Série #########
+a1<-ggAcf(resi_padrao1,  main = "", xlab="Defasagem", ylab="FAC", type = c("correlation"))+theme_minimal()
+a2<-ggAcf(resi_padrao1,type = c("partial"),  main = "", xlab="Defasagem", ylab="FACP")+theme_minimal()
+
+## Q-Q plot dos resíduos SARMAIMA
+# max_r<- max(resi_padrao1,na.rm=T)
+# min_r<- min(resi_padrao1,na.rm=T)
+# qqnorm(resi_padrao, pch = "+",
+#        xlim=c(0.95*min_r,max_r*1.05),
+#        ylim=c(0.95*min_r,max_r*1.05),
+#        main="",xlab="quantis normais",ylab="quantis emp?ricos")
+# lines(c(-10,10),c(-10,10),lty=2)
+
+a3<-ggpubr::ggqqplot(resi_padrao1)+labs(y = "Quantis Amostrais",x="Quantis Teóricos",title="")+
+    theme_minimal()
+
+## Resíduos vs. índices SARMAIMA
+
+df1<-data.frame(resi_padrao1)
+a4<-ggplot(df1)+
+  geom_point(aes(x=1:n,y=resi_padrao1),size=1.5) +
+  labs(x="Índice",y="Resíduo")+
+  geom_hline(yintercept = -2,linetype="dashed",colour = "blue",size=0.3)+
+  geom_hline(yintercept = -3,linetype="longdash",colour = "blue",size=0.3)+
+  geom_hline(yintercept = 2,linetype="dashed",colour = "blue",size=0.3)+
+  geom_hline(yintercept = 3,linetype="longdash",colour = "blue",size=0.3)+
+  theme_minimal()+
+  scale_y_continuous(breaks = c(-3,-2,-1,0,1,2,3))
+
+cowplot::plot_grid(a1,a2,a4,a3,ncol = 2)
+```
+---
+# Testes modelo SARMA
+
+- <b>Ljung e Box</b>: obteve-se p-valor de 0.689; (Considerando 110 lags)
+
+H<sub>0</sub>: Não existe autocorrelação nos resíduos.
+
+- <b>Shapiro-Wilk</b>: obteve-se p-valor de 0.3;
+
+H<sub>0</sub>: Segue a distribuição normal.
+
+- <b>ADF</b>: obteve-se p-valor de <0.01.
+
+H<sub>0</sub>: A série apresenta tendência.
+
+---
+
+Ajuste e previsão de 12 meses do modelo ajustado SARMA(2,0,0)(2,0,0)<sub>12</sub>
+
+
+```{r ,echo=FALSE,warning=FALSE,fig.align='center',fig.width = 10}
+#"Ajuste e previsão de 12 meses do modelo ajustado SARMA$(2,0,0)(2,0,0)_{12}$."}
+predicao = y-mod$residuals
+t3<-seq(as.Date("2012/03/01"), by = "month", length.out = 129) 
+df3<-data.frame(t3,Y,pred=c(as.vector(predicao),as.vector(pred$pred)))
+ggplot(df3)+
+  geom_line(aes(x=t3,y=as.vector(Y)))+
+  geom_line(aes(x=t3,y=pred),colour = "red")+
+  geom_vline(xintercept = as.Date("2021/11/01"),linetype="dashed",colour = "black",size=0.5)+
+  labs(x="Tempo (meses)",
+       y="Taxa de desocupação")+
+  theme_classic()
+
+```
+
+---
+
+# $\beta$ARMA
+
+<table>
+<caption>Coeficientes do modelo ajustado &beta;ARMA</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;">   </th>
+   <th style="text-align:right;"> Estimate </th>
+   <th style="text-align:right;"> Std. Error </th>
+   <th style="text-align:right;"> z value </th>
+   <th style="text-align:right;"> Pr(&gt;|z|) </th>
+   <th style="text-align:left;">   </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> &alpha; </td>
+   <td style="text-align:right;"> -0.0227 </td>
+   <td style="text-align:right;"> 0.0031 </td>
+   <td style="text-align:right;"> 7.3883 </td>
+   <td style="text-align:right;"> 0 </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> &phi;<sub>1</sub> </td>
+   <td style="text-align:right;"> 2.2430 </td>
+   <td style="text-align:right;"> 0.0221 </td>
+   <td style="text-align:right;"> 101.5395 </td>
+   <td style="text-align:right;"> 0 </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> &phi;<sub>2</sub> </td>
+   <td style="text-align:right;"> -1.7391 </td>
+   <td style="text-align:right;"> 0.0320 </td>
+   <td style="text-align:right;"> 54.3910</td>
+   <td style="text-align:right;"> 0 </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> &phi;<sub>4</sub> </td>
+   <td style="text-align:right;"> 1.1362 </td>
+   <td style="text-align:right;"> 0.0297 </td>
+   <td style="text-align:right;"> 38.2994  </td>
+   <td style="text-align:right;"> 0 </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> &phi;<sub>5</sub> </td>
+   <td style="text-align:right;"> 0.6506 </td>
+   <td style="text-align:right;"> 0.0191 </td>
+   <td style="text-align:right;"> 34.1000 </td>
+   <td style="text-align:right;"> 0 </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> &theta;<sub>1</sub> </td>
+   <td style="text-align:right;"> -0.7873 </td>
+   <td style="text-align:right;"> 0.0403 </td>
+   <td style="text-align:right;"> 19.5355 </td>
+   <td style="text-align:right;"> 0 </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> &theta;<sub>2</sub> </td>
+   <td style="text-align:right;"> 0.1884 </td>
+   <td style="text-align:right;"> 0.0411 </td>
+   <td style="text-align:right;"> 4.5800 </td>
+   <td style="text-align:right;"> 0 </td>
+   <th style="text-align:left;"> *** </th>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> &theta;<sub>6</sub> </td>
+   <td style="text-align:right;"> -0.5344 </td>
+   <td style="text-align:right;"> 0.0311 </td>
+   <td style="text-align:right;"> 17.1823 </td>
+   <td style="text-align:right;"> 0 </td>
+   <th style="text-align:left;"> *** </th>
+  </tr>
+    <tr>
+   <td style="text-align:left;"> &beta;<sub>1</sub> </td>
+   <td style="text-align:right;"> 0.0494 </td>
+   <td style="text-align:right;"> 0.0037 </td>
+   <td style="text-align:right;"> 13.4092 </td>
+   <td style="text-align:right;"> 0 </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+    <tr>
+   <td style="text-align:left;"> &beta;<sub>2</sub> </td>
+   <td style="text-align:right;"> -0.0375 </td>
+   <td style="text-align:right;"> 0.0039 </td>
+   <td style="text-align:right;"> 9.7009 </td>
+   <td style="text-align:right;"> 0 </td>
+   <th style="text-align:left;"> ***  </th>
+  </tr>
+    <tr>
+   <td style="text-align:left;"> &phi;<sub>p</sub> </td>
+   <td style="text-align:right;"> 21441.2855 </td>
+   <td style="text-align:right;"> 2878.0849 </td>
+   <td style="text-align:right;"> 7.4498 </td>
+   <td style="text-align:right;"> 0 </td>
+   <th style="text-align:left;"> *** </th>
+  </tr>
+</tbody>
+</table>
+
+---
+
+Gráficos para análise do ajuste do modelo &beta;ARMA
+
+```{r,echo=FALSE,include=FALSE}
+source("barma.r")
+barma2<-barma(y,ar=c(1,2,4,5), ma=c(1,2,6), h=h1,diag=1,resid=1,X = dif1,X_hat = dif2)
+```
+
+```{r,echo=FALSE,warning=FALSE,fig.align='center',fig.width = 10,fig.height=7.5}
+res=barma2$resid1
+pref=barma2$forecast
+# barma2$model
+# adf.test(res)
+# shapiro.test(res)
+# teste<-Box.test(res, lag = 110, type = c("Ljung-Box"), fitdf = 0)
+# teste$p.value
+
+############# ACF_Série e ACFP_Série #########
+a1<-ggAcf(res,  main = "", xlab="Defasagem", ylab="FAC", type = c("correlation"))+
+    theme_minimal()
+a2<-ggAcf(res,type = c("partial"),  main = "", xlab="Defasagem", ylab="FACP")+
+    theme_minimal()
+
+a3<-ggpubr::ggqqplot(res)+labs(y = "Quantis Amostrais",x="Quantis Teóricos",title="")+
+    theme_minimal()
+
+## Resíduos vs. índices SARMAIMA
+
+df1<-data.frame(res)
+a4<-ggplot(df1)+
+  geom_point(aes(x=1:length(res),y=res),size=1.5) +
+  labs(x="Índice",y="Resíduo")+
+  geom_hline(yintercept = -2,linetype="dashed",colour = "blue",size=0.3)+
+  geom_hline(yintercept = -3,linetype="longdash",colour = "blue",size=0.3)+
+  geom_hline(yintercept = 2,linetype="dashed",colour = "blue",size=0.3)+
+  geom_hline(yintercept = 3,linetype="longdash",colour = "blue",size=0.3)+
+  theme_minimal()+
+  scale_y_continuous(breaks = c(-3,-2,-1,0,1,2,3))
+
+cowplot::plot_grid(a1,a2,a4,a3,ncol = 2)
+```
+
+
+
+---
+# Testes modelo $\beta$ARMA
+
+- <b>Ljung e Box</b>: obteve-se p-valor de 0.181; (Considerando 110 lags)
+
+H<sub>0</sub>: Não existe autocorrelação nos resíduos.
+
+- <b>Shapiro-Wilk</b>: obteve-se p-valor de 0.9;
+
+H<sub>0</sub>: Segue a distribuição normal.
+
+- <b>ADF</b>: obteve-se p-valor de <0.01.
+
+H<sub>0</sub>: A série apresenta tendência.
+
+---
+Ajuste e previsão de 12 meses do modelo ajustado &beta;ARMA
+
+
+```{r ,echo=FALSE,warning=FALSE,fig.align='center',fig.width = 10}
+t3<-seq(as.Date("2012/03/01"), by = "month", length.out = 129) 
+df3<-data.frame(t3,Y,pred=c(barma2$fitted,barma2$forecast))
+ggplot(df3)+
+  geom_line(aes(x=t3,y=as.vector(Y)))+
+  geom_line(aes(x=t3,y=pred),colour = "red")+
+  geom_vline(xintercept = as.Date("2021/11/01"),linetype="dashed",colour = "black",size=0.5)+
+  labs(x="Tempo (meses)",
+       y="Taxa de desocupação")+
+  theme_classic()
+```
+
+---
+# Previsão
+Medidas de EQM e MAPE, e gráfico de previsão para 12 meses dos modelos SARMA e &beta;ARMA
+
+
+<table>
+ <thead>
+  <tr>
+   <th style="text-align:right;"> </th>
+   <th colspan="2"> Ajuste </th>
+    <th colspan="2"> Previsão </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:right;">  </td>
+   <td style="text-align:center;"> EQM </td>
+   <td style="text-align:center;"> MAPE </td>
+   <td style="text-align:center;"> EQM </td>
+   <td style="text-align:center;"> MAPE  </td>
+  </tr>
+  <tr>
+   <td style="text-align:right;"> SARMA </td>
+   <th style="text-align:center;"> 2.21e<sup>-06</sup> </th>
+   <td style="text-align:center;"> 0.0117 </td>
+   <td style="text-align:center;"> 4.75e<sup>-04</sup>  </td>
+   <td style="text-align:center;"> 0.2049  </td>
+  </tr>
+    <tr>
+   <td style="text-align:right;"> &beta;ARMA </td>
+   <td style="text-align:center;"> 2.35e<sup>-06</sup> </td>
+   <th style="text-align:center;"> 0.0115 </th>
+   <th style="text-align:center;"> 4.87e<sup>-05</sup>  </th>
+   <th style="text-align:center;"> 0.0628  </th>
+  </tr>
+</tbody>
+</table>
+```{r ,echo=FALSE,warning=FALSE,fig.align='center',fig.width = 8,fig.height=4}
+plot( y_obs, col=1, type="l", ylim=c(0.08,0.125) , axes = F, main="", xlab="Meses (2021-2022)", ylab="Taxa de desocupação")
+lines(pref, lty = 2, lwd = 1)
+lines(as.vector(pred$pred), lty = 3, lwd = 1,)
+#lines(as.vector(zs1$pred), lty = 4, lwd = 1,)
+legend("bottomleft",legend=c( "Valores reais", expression(paste("Valores previstos (", beta, "ARMA)") ), "Valores previstos (SARMA)"  ),
+                    pt.bg="white", lty=c(1,2,3), bty="n" )
+axis(1, 1:12, c("dez","jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov"))
+axis(2)
+```
+---
+
+Previsão para 12 meses dos modelos SARMA e &beta;ARMA.
+
+<table>
+<tbody>
+ <thead>
+  <tr>
+   <th style="text-align:center;"> Data </th>
+   <th style="text-align:center;"> Real </th>
+   <th style="text-align:center;"> &beta;ARMA </th>
+   <th style="text-align:center;"> SARMA </th>
+  </tr>
+   </thead>
+  <tr>
+   <td style="text-align:right;"> 2021/12 </td>
+   <td style="text-align:right;"> 0.1110 </td>
+   <td style="text-align:right;"> 0.1126 </td>
+   <td style="text-align:right;"> 0.1129 </td>
+  </tr>
+      <tr>
+   <td style="text-align:right;"> 2022/01 </td>
+   <td style="text-align:right;"> 0.1120 </td>
+   <td style="text-align:right;"> 0.1113  </td>
+   <td style="text-align:right;"> 0.1139 </td>
+  </tr>
+    <tr>
+   <td style="text-align:right;"> 2022/02 </td>
+   <td style="text-align:right;">  0.1120 </td>
+   <td style="text-align:right;"> 0.1122 </td>
+   <td style="text-align:right;"> 0.1151 </td>
+  </tr>
+    <tr>
+   <td style="text-align:right;"> 2022/03 </td>
+   <td style="text-align:right;"> 0.1110 </td>
+   <td style="text-align:right;"> 0.1131 </td>
+   <td style="text-align:right;"> 0.1180 </td>
+  </tr>
+    <tr>
+   <td style="text-align:right;"> 2022/04 </td>
+   <td style="text-align:right;"> 0.1050 </td>
+   <td style="text-align:right;"> 0.1124 </td>
+   <td style="text-align:right;"> 0.1184 </td>
+  </tr>
+    <tr>
+   <td style="text-align:right;"> 2022/05 </td>
+   <td style="text-align:right;"> 0.0980 </td>
+   <td style="text-align:right;"> 0.1094 </td>
+   <td style="text-align:right;"> 0.1190 </td>
+  </tr>
+    <tr>
+   <td style="text-align:right;"> 2022/06 </td>
+   <td style="text-align:right;"> 0.0930 </td>
+   <td style="text-align:right;"> 0.1050 </td>
+   <td style="text-align:right;"> 0.1189 </td>
+  </tr>
+    <tr>
+   <td style="text-align:right;"> 2022/07 </td>
+   <td style="text-align:right;"> 0.0910 </td>
+   <td style="text-align:right;"> 0.1005 </td>
+   <td style="text-align:right;"> 0.1187 </td>
+  </tr>
+    <tr>
+   <td style="text-align:right;"> 2022/08 </td>
+   <td style="text-align:right;"> 0.0890 </td>
+   <td style="text-align:right;"> 0.0965 </td>
+   <td style="text-align:right;"> 0.1191 </td>
+  </tr>
+    <tr>
+   <td style="text-align:right;"> 2022/09 </td>
+   <td style="text-align:right;"> 0.0870 </td>
+   <td style="text-align:right;"> 0.0929 </td>
+   <td style="text-align:right;"> 0.1170 </td>
+  </tr>
+    <tr>
+   <td style="text-align:right;"> 2022/10 </td>
+   <td style="text-align:right;"> 0.0830 </td>
+   <td style="text-align:right;"> 0.0894 </td>
+   <td style="text-align:right;"> 0.1132 </td>
+  </tr>
+    <tr>
+   <td style="text-align:right;"> 2022/11 </td>
+   <td style="text-align:right;"> 0.0810 </td>
+   <td style="text-align:right;"> 0.0862 </td>
+   <td style="text-align:right;"> 0.1102 </td>
+  </tr>
+</tbody>
+</table>
+
+---
+# Conclusão
+
+O modelo ajustado $\beta$ARMA foi muito superior ao modelo SARMA, especialmente na previsão dos 12 meses, se aproximando muito mais dos valores reais da Taxa de desemprego mensal do Brasil, registrada naquele intervalo de tempo. Já para o ajuste da série, os dois modelos se saíram similares. 
+
+
+---
+
+class: center, middle
+
+# Obrigado!
